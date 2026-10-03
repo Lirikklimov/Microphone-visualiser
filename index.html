@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Визуализатор микрофона — спектр, осциллограмма, запись</title>
+
+<!-- Фавикон: спектральные столбики -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23ff6ec7'/%3E%3Cstop offset='0.5' stop-color='%23c084fc'/%3E%3Cstop offset='1' stop-color='%234fc3ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='%230a0a12'/%3E%3Cline x1='8' y1='32' x2='56' y2='32' stroke='%23334' stroke-width='1' stroke-dasharray='2 3'/%3E%3Crect x='14' y='38' width='6' height='12' rx='3' fill='url(%23g)'/%3E%3Crect x='23' y='28' width='6' height='22' rx='3' fill='url(%23g)'/%3E%3Crect x='32' y='16' width='6' height='34' rx='3' fill='url(%23g)'/%3E%3Crect x='41' y='24' width='6' height='26' rx='3' fill='url(%23g)'/%3E%3Crect x='50' y='34' width='6' height='16' rx='3' fill='url(%23g)'/%3E%3C/svg%3E">
+
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #050508;
+    font-family: system-ui, sans-serif;
+    color: #fff;
+  }
+  #canvas {
+    position: fixed;
+    inset: 0;
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    background: radial-gradient(circle at 50% 50%, #12121c 0%, #050508 100%);
+  }
+  .ui {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    z-index: 10;
+    pointer-events: none;
+    transition: opacity 0.4s;
+    max-width: 96vw;
+  }
+  .ui.hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .btn-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+    pointer-events: auto;
+  }
+  button {
+    pointer-events: auto;
+    padding: 12px 22px;
+    font-size: 14px;
+    border: none;
+    border-radius: 30px;
+    background: linear-gradient(135deg, #4f7cff, #8b3dff);
+    color: #fff;
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+    box-shadow: 0 0 20px rgba(80, 120, 255, 0.5);
+    backdrop-filter: blur(6px);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+  }
+  button.secondary {
+    background: linear-gradient(135deg, #2a3350, #1a1f35);
+    box-shadow: 0 0 15px rgba(80, 120, 255, 0.25);
+    border: 1px solid rgba(100, 140, 255, 0.35);
+  }
+  button.record {
+    background: linear-gradient(135deg, #ff2d55, #c01340);
+    box-shadow: 0 0 20px rgba(255, 45, 85, 0.5);
+  }
+  button.record.active {
+    background: linear-gradient(135deg, #5a0f1f, #3a0812);
+    border: 1px solid rgba(255, 60, 90, 0.6);
+    animation: pulse 1.4s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 20px rgba(255, 45, 85, 0.5); }
+    50% { box-shadow: 0 0 35px rgba(255, 45, 85, 0.95); }
+  }
+  button.download {
+    background: linear-gradient(135deg, #1db954, #0d8a3d);
+    box-shadow: 0 0 20px rgba(29, 185, 84, 0.5);
+  }
+  button:hover:not(:disabled) { transform: scale(1.05); }
+  button:active:not(:disabled) { transform: scale(0.98); }
+  button:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    box-shadow: none;
+  }
+  .status {
+    font-size: 13px;
+    opacity: 0.65;
+    text-shadow: 0 0 10px rgba(0,0,0,0.8);
+    text-align: center;
+  }
+  .timer {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 15px;
+    color: #ff5577;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+  }
+  .rec-dot {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #ff2d55;
+    box-shadow: 0 0 10px #ff2d55;
+    animation: blink 1s infinite;
+  }
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.25; }
+  }
+  .toggle {
+    pointer-events: auto;
+    display: flex;
+    gap: 8px;
+    font-size: 13px;
+    opacity: 0.85;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .toggle label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    background: rgba(20, 25, 45, 0.6);
+    padding: 6px 12px;
+    border-radius: 20px;
+    border: 1px solid rgba(100, 140, 255, 0.25);
+    backdrop-filter: blur(6px);
+    user-select: none;
+  }
+  .hint {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    font-size: 12px;
+    opacity: 0.4;
+    z-index: 10;
+    pointer-events: none;
+    text-shadow: 0 0 8px rgba(0,0,0,0.8);
+  }
+  audio {
+    position: fixed;
+    bottom: 12px;
+    left: 12px;
+    width: 280px;
+    z-index: 11;
+    display: none;
+    border-radius: 24px;
+    filter: drop-shadow(0 0 12px rgba(80, 120, 255, 0.4));
+  }
+  audio.visible { display: block; }
+</style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+<div class="hint">F — полный экран · H — скрыть · R — запись</div>
+
+<audio id="player" controls></audio>
+
+<div class="ui" id="ui">
+  <div class="toggle">
+    <label><input type="checkbox" id="showSpectrum" checked> Спектр</label>
+    <label><input type="checkbox" id="showWave" checked> Осциллограмма</label>
+    <label><input type="checkbox" id="showMirror"> Зеркало</label>
+    <label><input type="checkbox" id="showLabels" checked> Частоты</label>
+    <label><input type="checkbox" id="showPeak" checked> Пик</label>
+  </div>
+  <div class="btn-row">
+    <button id="startBtn">🎤 Включить микрофон</button>
+    <button id="recBtn" class="record" disabled>⏺ Запись</button>
+    <button id="dlBtn" class="download" disabled>💾 Скачать</button>
+    <button id="fsBtn" class="secondary">⛶ На весь экран</button>
+    <button id="hideBtn" class="secondary">👁 Скрыть</button>
+  </div>
+  <div class="status" id="status">Нажмите кнопку и разрешите доступ к микрофону</div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const startBtn = document.getElementById('startBtn');
+const recBtn = document.getElementById('recBtn');
+const dlBtn = document.getElementById('dlBtn');
+const fsBtn = document.getElementById('fsBtn');
+const hideBtn = document.getElementById('hideBtn');
+const ui = document.getElementById('ui');
+const statusEl = document.getElementById('status');
+const player = document.getElementById('player');
+const showSpectrum = document.getElementById('showSpectrum');
+const showWave = document.getElementById('showWave');
+const showMirror = document.getElementById('showMirror');
+const showLabels = document.getElementById('showLabels');
+const showPeak = document.getElementById('showPeak');
+
+let audioContext, analyser, freqData, timeData, source;
+let mediaStream = null;
+let mediaRecorder = null;
+let recordedChunks = [];
+let recordedBlob = null;
+let recordingStartTime = 0;
+let timerInterval = null;
+let animationId = null;
+let running = false;
+let isRecording = false;
+let smoothed = null;
+let uiHidden = false;
+
+// ==================== FULLSCREEN ====================
+async function toggleFullscreen() {
+  try {
+    if (!document.fullscreenElement) {
+      await document.documentElement.requestFullscreen();
+    } else {
+      await document.exitFullscreen();
+    }
+  } catch (err) {
+    statusEl.textContent = 'Fullscreen недоступен: ' + err.message;
+  }
+}
+
+function updateFullscreenButton() {
+  fsBtn.innerHTML = document.fullscreenElement
+    ? '⛶ Выйти из полного экрана'
+    : '⛶ На весь экран';
+  setTimeout(resizeCanvas, 100);
+}
+
+document.addEventListener('fullscreenchange', updateFullscreenButton);
+document.addEventListener('webkitfullscreenchange', updateFullscreenButton);
+document.addEventListener('msfullscreenchange', updateFullscreenButton);
+fsBtn.addEventListener('click', toggleFullscreen);
+
+// ==================== HIDE UI ====================
+hideBtn.addEventListener('click', () => {
+  uiHidden = !uiHidden;
+  ui.classList.toggle('hidden', uiHidden);
+  hideBtn.innerHTML = uiHidden ? '👁 Показать' : '👁 Скрыть';
+});
+
+// ==================== HOTKEYS ====================
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  const k = e.key.toLowerCase();
+  if (k === 'f' || k === 'а') toggleFullscreen();
+  else if (k === 'h' || k === 'р') hideBtn.click();
+  else if ((k === 'r' || k === 'к') && !recBtn.disabled) recBtn.click();
+});
+
+// ==================== RECORD TIMER ====================
+function startTimer() {
+  recordingStartTime = performance.now();
+  timerInterval = setInterval(() => {
+    const elapsed = (performance.now() - recordingStartTime) / 1000;
+    const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+    const ss = String(Math.floor(elapsed % 60)).padStart(2, '0');
+    const tenths = Math.floor((elapsed * 10) % 10);
+    recBtn.innerHTML = `<span class="rec-dot"></span> ${mm}:${ss}.${tenths}`;
+  }, 100);
+}
+
+function stopTimer() {
+  if (timerInterval) clearInterval(timerInterval);
+  timerInterval = null;
+}
+
+// ==================== RECORDING ====================
+function pickMimeType() {
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/mp4',
+    'audio/mpeg',
+  ];
+  for (const type of candidates) {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(type)) {
+      return type;
+    }
+  }
+  return '';
+}
+
+function startRecording() {
+  if (!mediaStream || isRecording) return;
+
+  const mimeType = pickMimeType();
+  const options = mimeType ? { mimeType } : undefined;
+
+  try {
+    mediaRecorder = new MediaRecorder(mediaStream, options);
+  } catch (err) {
+    statusEl.textContent = 'MediaRecorder недоступен: ' + err.message;
+    return;
+  }
+
+  recordedChunks = [];
+
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) recordedChunks.push(e.data);
+  };
+
+  mediaRecorder.onstop = () => {
+    const type = mimeType || 'audio/webm';
+    recordedBlob = new Blob(recordedChunks, { type });
+
+    // Обновляем плеер
+    const url = URL.createObjectURL(recordedBlob);
+    player.src = url;
+    player.classList.add('visible');
+
+    dlBtn.disabled = false;
+
+    const sizeMB = (recordedBlob.size / 1024 / 1024).toFixed(2);
+    statusEl.textContent = `Запись готова: ${sizeMB} МБ · нажмите «Скачать» или прослушайте`;
+
+    stopTimer();
+    isRecording = false;
+    recBtn.classList.remove('active');
+    recBtn.innerHTML = '⏺ Запись';
+  };
+
+  mediaRecorder.start(100); // чанки каждые 100 мс
+  isRecording = true;
+  recBtn.classList.add('active');
+  statusEl.textContent = '⏺ Идёт запись...';
+  startTimer();
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  }
+}
+
+recBtn.addEventListener('click', () => {
+  if (isRecording) stopRecording();
+  else startRecording();
+});
+
+// ==================== DOWNLOAD ====================
+dlBtn.addEventListener('click', () => {
+  if (!recordedBlob) return;
+
+  const mimeType = recordedBlob.type || 'audio/webm';
+  let ext = 'webm';
+  if (mimeType.includes('ogg')) ext = 'ogg';
+  else if (mimeType.includes('mp4')) ext = 'm4a';
+  else if (mimeType.includes('mpeg')) ext = 'mp3';
+
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const filename = `mic-recording-${ts}.${ext}`;
+
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(recordedBlob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+
+// ==================== AUDIO ANALYSIS ====================
+const FREQ_MARKS = [
+  { hz: 20,    label: '20'  },
+  { hz: 50,    label: '50'  },
+  { hz: 100,   label: '100' },
+  { hz: 200,   label: '200' },
+  { hz: 500,   label: '500' },
+  { hz: 1000,  label: '1k'  },
+  { hz: 2000,  label: '2k'  },
+  { hz: 5000,  label: '5k'  },
+  { hz: 10000, label: '10k' },
+  { hz: 20000, label: '20k' },
+];
+
+function freqToX(hz, W, sampleRate) {
+  const minF = 20;
+  const maxF = Math.min(sampleRate / 2, 20000);
+  const clamped = Math.max(minF, Math.min(hz, maxF));
+  const t = (Math.log10(clamped) - Math.log10(minF)) / (Math.log10(maxF) - Math.log10(minF));
+  return t * W;
+}
+
+function xToBin(x, W, sampleRate, fftSize, binCount) {
+  const minF = 20;
+  const maxF = Math.min(sampleRate / 2, 20000);
+  const t = x / W;
+  const hz = Math.pow(10, Math.log10(minF) + t * (Math.log10(maxF) - Math.log10(minF)));
+  const binHz = sampleRate / fftSize;
+  return Math.max(0, Math.min(binCount - 1, Math.round(hz / binHz)));
+}
+
+function resizeCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = window.innerWidth * dpr;
+  canvas.height = window.innerHeight * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+async function start() {
+  if (running) return;
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 4096;
+    analyser.smoothingTimeConstant = 0.8;
+
+    source = audioContext.createMediaStreamSource(mediaStream);
+    source.connect(analyser);
+
+    freqData = new Uint8Array(analyser.frequencyBinCount);
+    timeData = new Uint8Array(analyser.fftSize);
+    smoothed = new Float32Array(analyser.frequencyBinCount);
+
+    running = true;
+    startBtn.innerHTML = '⏹ Остановить';
+    recBtn.disabled = false;
+    statusEl.textContent = 'Микрофон активен — говорите';
+    draw();
+  } catch (err) {
+    statusEl.textContent = 'Ошибка: ' + err.message;
+  }
+}
+
+function stop() {
+  if (isRecording) stopRecording();
+
+  running = false;
+  if (animationId) cancelAnimationFrame(animationId);
+  if (audioContext) audioContext.close();
+  if (mediaStream) {
+    mediaStream.getTracks().forEach(t => t.stop());
+    mediaStream = null;
+  }
+
+  startBtn.innerHTML = '🎤 Включить микрофон';
+  recBtn.disabled = true;
+  statusEl.textContent = 'Микрофон выключен';
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+startBtn.addEventListener('click', () => {
+  if (running) stop();
+  else start();
+});
+
+// ==================== DRAW ====================
+function draw() {
+  if (!running) return;
+  animationId = requestAnimationFrame(draw);
+
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+  const midY = H / 2;
+  const sampleRate = audioContext.sampleRate;
+  const fftSize = analyser.fftSize;
+  const binCount = analyser.frequencyBinCount;
+
+  analyser.getByteFrequencyData(freqData);
+  analyser.getByteTimeDomainData(timeData);
+
+  ctx.fillStyle = 'rgba(5, 5, 8, 0.28)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Индикатор записи в углу
+  if (isRecording) {
+    ctx.save();
+    const blink = (Math.sin(performance.now() / 250) + 1) / 2;
+    ctx.fillStyle = `rgba(255, 45, 85, ${0.5 + blink * 0.5})`;
+    ctx.beginPath();
+    ctx.arc(W - 30, 30, 8, 0, Math.PI * 2);
+    ctx.shadowColor = '#ff2d55';
+    ctx.shadowBlur = 20;
+    ctx.fill();
+    ctx.restore();
+  }
+
+  if (showLabels.checked) {
+    ctx.save();
+    ctx.font = '12px ui-monospace, Menlo, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    for (const { hz, label } of FREQ_MARKS) {
+      if (hz > sampleRate / 2) continue;
+      const x = freqToX(hz, W, sampleRate);
+      ctx.strokeStyle = 'rgba(120, 160, 255, 0.10)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 6]);
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, H);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(150, 190, 255, 0.55)';
+      ctx.fillText(label, x, 10);
+    }
+    ctx.restore();
+  }
+
+  if (showSpectrum.checked) {
+    const pixelsPerBar = 6;
+    const bars = Math.max(64, Math.floor(W / pixelsPerBar));
+    const barWidth = W / bars;
+    if (!smoothed || smoothed.length < bars) smoothed = new Float32Array(bars);
+
+    for (let i = 0; i < bars; i++) {
+      const xStart = (i / bars) * W;
+      const xEnd = ((i + 1) / bars) * W;
+      const binStart = xToBin(xStart, W, sampleRate, fftSize, binCount);
+      const binEnd = Math.max(binStart + 1, xToBin(xEnd, W, sampleRate, fftSize, binCount));
+      let sum = 0, count = 0;
+      for (let b = binStart; b < binEnd && b < binCount; b++) { sum += freqData[b]; count++; }
+      const val = count > 0 ? sum / count / 255 : 0;
+      smoothed[i] += (val - smoothed[i]) * 0.25;
+    }
+
+    for (let i = 0; i < bars; i++) {
+      const v = smoothed[i];
+      const h = v * H * 0.85 + 2;
+      const x = i * barWidth;
+      const hue = 220 + v * 120 + (i / bars) * 60;
+      const lightness = 45 + v * 30;
+      const grad = ctx.createLinearGradient(0, midY - h / 2, 0, midY + h / 2);
+      grad.addColorStop(0, `hsla(${hue}, 90%, ${lightness}%, 0.85)`);
+      grad.addColorStop(0.5, `hsla(${hue + 40}, 100%, 70%, 0.95)`);
+      grad.addColorStop(1, `hsla(${hue}, 90%, ${lightness}%, 0.85)`);
+      ctx.fillStyle = grad;
+      ctx.shadowColor = `hsla(${hue}, 100%, 60%, 0.9)`;
+      ctx.shadowBlur = 12 + v * 25;
+      const bw = barWidth * 0.7;
+      ctx.fillRect(x + barWidth * 0.15, midY - h / 2, bw, h);
+    }
+    ctx.shadowBlur = 0;
+  }
+
+  if (showWave.checked) {
+    const len = timeData.length;
+    const amp = H * 0.35;
+    ctx.save();
+    ctx.lineWidth = 2.5;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.shadowColor = 'rgba(120, 220, 255, 0.9)';
+    ctx.shadowBlur = 18;
+    const grad = ctx.createLinearGradient(0, 0, W, 0);
+    grad.addColorStop(0, '#4fc3ff');
+    grad.addColorStop(0.5, '#c084fc');
+    grad.addColorStop(1, '#ff6ec7');
+    ctx.strokeStyle = grad;
+    ctx.beginPath();
+    for (let i = 0; i < len; i++) {
+      const x = (i / (len - 1)) * W;
+      const norm = (timeData[i] - 128) / 128;
+      const y = midY + norm * amp;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    if (showMirror.checked) {
+      ctx.globalAlpha = 0.35;
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      for (let i = 0; i < len; i++) {
+        const x = (i / (len - 1)) * W;
+        const norm = (timeData[i] - 128) / 128;
+        const y = midY - norm * amp;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+
+  if (showPeak.checked) {
+    let maxVal = 0, maxBin = 0;
+    for (let i = 1; i < binCount; i++) {
+      if (freqData[i] > maxVal) { maxVal = freqData[i]; maxBin = i; }
+    }
+    if (maxVal > 30) {
+      const peakHz = maxBin * sampleRate / fftSize;
+      if (peakHz >= 20 && peakHz <= 20000) {
+        const x = freqToX(peakHz, W, sampleRate);
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 120, 200, 0.7)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 4]);
+        ctx.shadowColor = 'rgba(255, 120, 200, 0.9)';
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, H);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        const noteName = freqToNote(peakHz);
+        const label = `${Math.round(peakHz)} Гц  ${noteName}`;
+        ctx.font = 'bold 14px ui-monospace, Menlo, monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        const textW = ctx.measureText(label).width;
+        const boxW = textW + 20;
+        const boxH = 26;
+        let boxX = Math.max(6, Math.min(W - boxW - 6, x - boxW / 2));
+        ctx.fillStyle = 'rgba(20, 10, 30, 0.8)';
+        ctx.strokeStyle = 'rgba(255, 120, 200, 0.8)';
+        ctx.lineWidth = 1;
+        roundRect(ctx, boxX, 40, boxW, boxH, 8);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#ff9bd8';
+        ctx.textBaseline = 'middle';
+        ctx.shadowBlur = 0;
+        ctx.fillText(label, boxX + boxW / 2, 53);
+        ctx.fillStyle = '#ff6ec7';
+        ctx.shadowColor = '#ff6ec7';
+        ctx.shadowBlur = 15;
+        ctx.beginPath();
+        ctx.arc(x, midY, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+
+  ctx.strokeStyle = 'rgba(140, 180, 255, 0.3)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, midY);
+  ctx.lineTo(W, midY);
+  ctx.stroke();
+
+  if (showLabels.checked) drawBottomScale(W, H, sampleRate);
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function drawBottomScale(W, H, sampleRate) {
+  const scaleH = 26;
+  const y = H - scaleH;
+  ctx.fillStyle = 'rgba(10, 12, 24, 0.6)';
+  ctx.fillRect(0, y, W, scaleH);
+  ctx.strokeStyle = 'rgba(120, 160, 255, 0.25)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, y);
+  ctx.lineTo(W, y);
+  ctx.stroke();
+  ctx.font = '11px ui-monospace, Menlo, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(160, 200, 255, 0.75)';
+  for (const { hz, label } of FREQ_MARKS) {
+    if (hz > sampleRate / 2) continue;
+    const x = freqToX(hz, W, sampleRate);
+    ctx.strokeStyle = 'rgba(120, 160, 255, 0.45)';
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x, y + 6);
+    ctx.stroke();
+    ctx.fillText(label + ' Гц', x, y + 15);
+  }
+}
+
+function freqToNote(hz) {
+  if (hz < 20) return '';
+  const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const A4 = 440;
+  const semitones = 12 * Math.log2(hz / A4);
+  const n = Math.round(semitones) + 57;
+  const octave = Math.floor(n / 12) - 1;
+  const name = notes[((n % 12) + 12) % 12];
+  return `${name}${octave}`;
+}
+</script>
+</body>
+</html>
